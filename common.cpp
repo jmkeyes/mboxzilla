@@ -61,6 +61,7 @@ bool FileExists(const std::string& path) {
     struct stat path_stat;
     return (stat(path.c_str(), &path_stat) == 0 && S_ISREG(path_stat.st_mode));
 }
+
 //---------------------------------------------------------------------------------------------
 /**
  *  DirectoryExists()
@@ -406,7 +407,7 @@ bool createPath( std::string path, mode_t mode ) {
 
             if( stat( newPath.c_str(), &st) != 0)
             {
-                #ifdef __linux__
+                #if defined(__linux__) || defined(__APPLE__)
                 if( mkdir( newPath.c_str(), mode) != 0 && errno != EEXIST )
                 #else
                 if( mkdir( newPath.c_str()) != 0 && errno != EEXIST )
