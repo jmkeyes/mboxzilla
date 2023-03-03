@@ -1,3 +1,4 @@
 mboxzilla
 *.exe
 *.o
+*.d
