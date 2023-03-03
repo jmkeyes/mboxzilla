@@ -219,10 +219,10 @@ From linux do :
 
   - linux binary:
     ```
-    g++ -Os -s -std=c++11 mboxzilla.cpp mbox_parser.cpp common.cpp easylogging++.cc -o bin/linux/mboxzilla -lcrypto -lcurl -lz -DELPP_NO_DEFAULT_LOG_FILE
+    g++ -Os -s -std=c++11 mboxzilla.cpp mbox_parser.cpp common.cpp easylogging++.cc -o mboxzilla -lcrypto -lcurl -lz -DELPP_NO_DEFAULT_LOG_FILE
     ```
   - windows executable:
     ```
-    i686-w64-mingw32-g++ -static -Os -s -std=c++11 mboxzilla.cpp mbox_parser.cpp common.cpp easylogging++.cc -o bin/win32/mboxzilla.exe -lcurl -lpthread -lssl -lssh2 -lcrypto -lz -lws2_32 -lwldap32 -lwinmm -lgdi32 -DCURL_STATICLIB -DELPP_NO_DEFAULT_LOG_FILE
+    i686-w64-mingw32-g++ -static -Os -s -std=c++11 mboxzilla.cpp mbox_parser.cpp common.cpp easylogging++.cc -o mboxzilla.exe -lcurl -lpthread -lssl -lssh2 -lcrypto -lz -lws2_32 -lwldap32 -lwinmm -lgdi32 -DCURL_STATICLIB -DELPP_NO_DEFAULT_LOG_FILE
     ```
 The **Mbox_parser** class can be freely used outside this project.
