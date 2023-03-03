@@ -1374,7 +1374,7 @@ Options::help(const std::vector<std::string>& groups) const
   if (m_help_arguments_string.size() > 0) {
     result += " " + m_help_arguments_string;
   }
-  
+
   if (m_positional.size() > 0) {
     result += " positional parameters";
   }
