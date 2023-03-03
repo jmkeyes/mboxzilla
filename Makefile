@@ -7,6 +7,11 @@ CXXFLAGS := -std=c++11
 CPPFLAGS := -MMD -DELPP_THREAD_SAFE -DELPP_NO_DEFAULT_LOG_FILE
 LDLIBS   := -lcurl -lcrypto -lz
 
+JSON_VERSION        ?= v3.6.1
+CXXOPTS_VERSION     ?= v1.0.0
+SIMPLEINI_VERSION   ?= 66a7ead100f7f41c14afc0ab528a46f928a9f3d8 # approx 4.17
+EASYLOGGING_VERSION ?= v9.95.0
+
 ifdef DEBUG
 CXXFLAGS += -g
 else
@@ -27,7 +32,14 @@ else
     endif
 endif
 
-.PHONY: all clean install
+# Define a cross-platform macro for downloading files.
+ifdef COMSPEC
+   download-file = Invoke-WebRequest -Uri $1 -OutFile $2 | Out-Null
+else
+   download-file = curl -s -L -o $1 $2
+endif
+
+.PHONY: all clean install update
 
 all: $(TARGET)
 
@@ -41,3 +53,20 @@ $(TARGET): $(OBJECTS)
 
 # Include all dependencies.
 -include $(DEPENDS)
+
+update: update-json update-cxxopts update-simpleini update-easylogging
+
+update-json:
+	$(call download-file, json.hpp, "https://github.com/nlohmann/json/releases/download/$(JSON_VERSION)/json.hpp")
+
+update-cxxopts:
+	$(error "The 'cxxopts' library has been modified from upstream 1.0.0.")
+	#$(call download-file, cxxopts.hpp, "https://raw.githubusercontent.com/jarro2783/cxxopts/$(CXXOPTS_VERSION)/include/cxxopts.hpp")
+
+update-simpleini:
+	$(call download-file, SimpleIni.h, "https://raw.githubusercontent.com/brofield/simpleini/$(SIMPLEINI_VERSION)/SimpleIni.h")
+	$(call download-file, ConvertUTF.h, "https://raw.githubusercontent.com/brofield/simpleini/$(SIMPLEINI_VERSION)/ConvertUTF.h")
+
+update-easylogging:
+	$(call download-file, easylogging++.cpp, "https://github.com/amrayn/easyloggingpp/raw/$(EASYLOGGING_VERSION)/src/easylogging%2B%2B.cc")
+	$(call download-file, easylogging++.h, "https://github.com/amrayn/easyloggingpp/raw/$(EASYLOGGING_VERSION)/src/easylogging%2B%2B.h")
