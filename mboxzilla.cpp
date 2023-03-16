@@ -1,7 +1,7 @@
 /*
     BSD 2-Clause License
 
-    Copyright (c) 2017-2019, Noël Martinon
+    Copyright (c) 2017-2019, Noï¿½l Martinon
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -66,6 +66,7 @@ int main(int argc, char**argv)
     std::string outputdir;
     std::string outputpath;
     std::string logfilename;
+    std::string configFilePath;
     bool bGetLocalFolders=false;
     std::string username="";
     std::string email_domain="";
@@ -104,7 +105,10 @@ int main(int argc, char**argv)
 
 
     try {
-        cxxopts::Options options("mboxzilla", APP_DESCRIPTION, "[CONFIG_FILE]");
+        cxxopts::Options options("mboxzilla", APP_DESCRIPTION);
+
+        // We want the option to pass a raw configuration file alone.
+        options.allow_unrecognised_options();
 
         options.add_options()
             ("f,file",
@@ -123,6 +127,8 @@ int main(int argc, char**argv)
             ("c,compact",
                 "Compact mbox file to file whose name is formatted in 'mboxfilename_YYYYmmddHHMMSS'.",
                     cxxopts::value<bool>(bActionCompact))
+            ("C,config",
+                "A configuration file to parse for arguments.", cxxopts::value<std::string>(configFilePath), "FILE")
             ("s,split",
                 "Split mbox file into several mbox files of maximum N bytes size. "
                 "This smaller files are named 'mboxfilename.#' where # is an increment number with auto leading zero if necessary.",
@@ -215,75 +221,69 @@ int main(int argc, char**argv)
                 "Display command line options.")
         ;
 
-        // load settings from a configuration file
-        CSimpleIniA ini;
-        if (argc==2 && ini.LoadFile(argv[1])>=0) {
+        // Try to load any configuration file, if specified.
+        options.parse_positional({"config"});
 
-            std::vector<string> args;
-            CSimpleIniA::TNamesDepend keys;
-            ini.GetAllKeys("", keys);
+        // Parse all arguments supplied on the command line.
+        auto arguments = options.parse(argc, argv);
 
-            CSimpleIniA::TNamesDepend::const_iterator i;
-            std::string s_argv;
+        if (arguments.count("config") >= 1) {
+            std::vector<std::string> args;
+
+            CSimpleIniA configuration;
+
+            if (configuration.LoadFile(configFilePath.c_str()) < 0) {
+                throw cxxopts::exceptions::specification(fmt("Unable to load config file: %s", argv[1]));
+            }
+
+            // Clear out everything and start over.
+            args.clear();
+
+            // We need the program name for argument parsing.
             args.push_back(argv[0]);
+
+            // Load all top-level keys from the configuration.
+            CSimpleIniA::TNamesDepend keys;
+            configuration.GetAllKeys("", keys);
+
+            // Iterate through any loaded keys to retrieve values.
+            CSimpleIniA::TNamesDepend::const_iterator i;
             for (i = keys.begin(); i != keys.end(); ++i) {
-                // get the value of a key
-                const char * pszValue = ini.GetValue("", i->pItem, NULL);
-                if (std::string(pszValue).empty()) {
-                    std::string msg = u8"Empty value for option '";
-                    msg += i->pItem;
-                    msg += "'";
-                    throw cxxopts::OptionSpecException(msg);
+                std::string value(configuration.GetValue("", i->pItem, NULL));
+
+                if (value.empty()) {
+                    throw cxxopts::exceptions::specification(fmt(u8"Empty value for option %s", i->pItem));
                 }
 
-                if (std::string(pszValue)=="false") continue;
-                else if (std::string(pszValue)=="true")
-                    s_argv = "--" + std::string(i->pItem);
-                else s_argv = "--" + std::string(i->pItem) + "=" + std::string(pszValue);
-
-                args.push_back(s_argv.c_str());
-            }
-
-            // reset 'argc' and 'argv' (executable name + ini keys + NULL)
-            argc = args.size();
-            char **argv = new char*[argc+1];
-            for (size_t j = 0;  j < argc;  ++j)     // copy args
-                argv[j] = (char*)args[j].c_str();
-            argv[argc] = NULL;
-
-            options.parse(argc, (char**&)argv);
-
-            // Case bad option in the file
-            if (argc>2) {
-                std::string msg = u8"Too many or unknown specified options ";
-                for (int i=1; i<argc; i++) {
-                    msg = msg+"'"+argv[i]+"'";
-                    if (i+1<argc) msg += ", ";
+                if (value == "false") {
+                    continue;
+                } else if (value == "true") {
+                    args.push_back(fmt("--%s", i->pItem));
+                } else {
+                    args.push_back(fmt("--%s=%s", i->pItem, value.c_str()));
                 }
-                throw cxxopts::OptionSpecException(msg);
             }
 
-        }
-        else {
-            options.parse(argc, argv);
-
-            if (argc>1) {
-                std::string msg = u8"Too many or unknown specified options ";
-                for (int i=1; i<argc; i++) {
-                    msg = msg+"'"+argv[i]+"'";
-                    if (i+1<argc) msg += ", ";
-                }
-                throw cxxopts::OptionSpecException(msg);
+            // Convert the stored arguments into parameters.
+            std::vector<const char*> parameters;
+            for (std::string &arg : args) {
+                parameters.push_back(arg.data());
             }
+
+            int pargc = parameters.size();
+            char **pargv = (char **) parameters.data();
+
+            // Overwrite any passed arguments and continue on.
+            arguments = options.parse(pargc, pargv);
         }
 
-        if (options.count("version"))
+        if (arguments.count("version"))
         {
           std::cout << APP_VERSION << endl;
           exit(0);
         }
 
-        if (options.count("help"))
+        if (arguments.count("help"))
         {
           std::cout << APP_INFO << std::endl;
           std::cout << options.help({"", "Group"}) << std::endl;
@@ -291,67 +291,67 @@ int main(int argc, char**argv)
           exit(0);
         }
 
-        if (options.count("e") && (options.count("s")||options.count("c")) && bSynchonize)
+        if (arguments.count("e") && (arguments.count("s")||arguments.count("c")) && bSynchonize)
         {
-          throw cxxopts::OptionSpecException(u8"Option 'e' is not compatible with 's' or 'c' when sync is enabled.");
+          throw cxxopts::exceptions::specification(u8"Option 'e' is not compatible with 's' or 'c' when sync is enabled.");
           exit(0);
         }
 
-        if (options.count("v"))
+        if (arguments.count("v"))
         {
-            int value = options["v"].as<int>();
+            int value = arguments["v"].as<int>();
             if (value<1 || value>3)
-                throw cxxopts::OptionSpecException(u8"Option 'v' requires an optional value between 1 and 3 (implicitly 3)");
+                throw cxxopts::exceptions::specification(u8"Option 'v' requires an optional value between 1 and 3 (implicitly 3)");
             el::Loggers::setVerboseLevel(value);
         }
 
-        if (!options.count("f") && !options.count("a"))
+        if (!arguments.count("f") && !arguments.count("a"))
         {
-            throw cxxopts::OptionSpecException(u8"Option 'f' or 'a' is required");
+            throw cxxopts::exceptions::specification(u8"Option 'f' or 'a' is required");
         }
 
-        if (options.count("s"))
+        if (arguments.count("s"))
         {
             bActionSplit = true;
             if (iSplitMaxSize<=0)
-                throw cxxopts::OptionSpecException(u8"Option 's' requires a positive value");
+                throw cxxopts::exceptions::specification(u8"Option 's' requires a positive value");
         }
 
-        if ((options.count("u") && !options.count("k")) ||
-            (!options.count("u") && options.count("k"))) {
-                throw cxxopts::OptionSpecException(u8"Options 'u' and 'k' are linked and must both be configured");
+        if ((arguments.count("u") && !arguments.count("k")) ||
+            (!arguments.count("u") && arguments.count("k"))) {
+                throw cxxopts::exceptions::specification(u8"Options 'u' and 'k' are linked and must both be configured");
         }
 
-        if (options.count("speed-limit") && !options.count("u") && !options.count("k")) {
-                throw cxxopts::OptionSpecException(u8"Option 'speed-limit' can not be used without options 'u' and 'k'");
+        if (arguments.count("speed-limit") && !arguments.count("u") && !arguments.count("k")) {
+                throw cxxopts::exceptions::specification(u8"Option 'speed-limit' can not be used without options 'u' and 'k'");
         }
 
-        if (options.count("u")){
-            host_url = options["u"].as<std::string>();
+        if (arguments.count("u")){
+            host_url = arguments["u"].as<std::string>();
         }
 
-        if (options.count("k")){
-            aes_key = AES_NormalizeKey(options["k"].as<std::string>());
+        if (arguments.count("k")){
+            aes_key = AES_NormalizeKey(arguments["k"].as<std::string>());
         }
 
-        if (options.count("age-min") && options.count("date-before")){
-                throw cxxopts::OptionSpecException(u8"Options 'age-min' and 'date-before' can not be specified at the same time");
+        if (arguments.count("age-min") && arguments.count("date-before")){
+                throw cxxopts::exceptions::specification(u8"Options 'age-min' and 'date-before' can not be specified at the same time");
         }
 
-        if (options.count("age-max") && options.count("date-after")){
-                throw cxxopts::OptionSpecException(u8"Options 'age-max' and 'date-after' can not be specified at the same time");
+        if (arguments.count("age-max") && arguments.count("date-after")){
+                throw cxxopts::exceptions::specification(u8"Options 'age-max' and 'date-after' can not be specified at the same time");
         }
 
-        if (options.count("timeout")){
-            if (timeout<0) throw cxxopts::OptionSpecException(u8"Option 'timeout' required a positive value");
+        if (arguments.count("timeout")){
+            if (timeout<0) throw cxxopts::exceptions::specification(u8"Option 'timeout' required a positive value");
         }
 
-        if (options.count("log-file"))
+        if (arguments.count("log-file"))
         {
             el::Loggers::reconfigureAllLoggers(el::ConfigurationType::Filename, logfilename);
         }
     }
-    catch (const cxxopts::OptionException& e) {
+    catch (const cxxopts::exceptions::exception& e) {
         std::cout << APP_INFO << std::endl;
         std::cout << "Error parsing options: " << e.what() << std::endl;
         std::cout << "Try --help for usage information." << std::endl << std::endl;

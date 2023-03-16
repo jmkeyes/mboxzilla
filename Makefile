@@ -8,7 +8,7 @@ CPPFLAGS := -MMD -DELPP_THREAD_SAFE -DELPP_NO_DEFAULT_LOG_FILE
 LDLIBS   := -lcurl -lcrypto -lz
 
 JSON_VERSION        ?= v3.11.2
-CXXOPTS_VERSION     ?= v1.0.0
+CXXOPTS_VERSION     ?= v3.1.1
 SIMPLEINI_VERSION   ?= 4.19
 EASYLOGGING_VERSION ?= v9.97.0
 
@@ -60,8 +60,7 @@ update-json:
 	$(call download-file, json.hpp, "https://github.com/nlohmann/json/releases/download/$(JSON_VERSION)/json.hpp")
 
 update-cxxopts:
-	$(error "The 'cxxopts' library has been modified from upstream 1.0.0.")
-	#$(call download-file, cxxopts.hpp, "https://raw.githubusercontent.com/jarro2783/cxxopts/$(CXXOPTS_VERSION)/include/cxxopts.hpp")
+	$(call download-file, cxxopts.hpp, "https://raw.githubusercontent.com/jarro2783/cxxopts/$(CXXOPTS_VERSION)/include/cxxopts.hpp")
 
 update-simpleini:
 	$(call download-file, SimpleIni.h, "https://raw.githubusercontent.com/brofield/simpleini/$(SIMPLEINI_VERSION)/SimpleIni.h")

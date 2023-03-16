@@ -1,7 +1,7 @@
 /*
     BSD 2-Clause License
 
-    Copyright (c) 2017-2019, Noël Martinon
+    Copyright (c) 2017-2019, Noï¿½l Martinon
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -1211,5 +1211,22 @@ void Remove_EmptyDir(std::string directory) {
         if (vList.empty())
             std::remove(itDir.c_str());
     }
+}
+//---------------------------------------------------------------------------------------------
+/**
+ * Format a string with a C-style syntax.
+ */
+template<typename... T> std::string fmt(const std::string fmt, T... args)
+{
+    // Estimate the size of the formatted string as a whole.
+    int size_estimate = std::snprintf(nullptr, 0, fmt.c_str(), args...);
+
+    // Allocate enough room for the whole string + NULL terminator.
+    std::vector<char> buf(size_estimate + 1);
+
+    // Format the string into the buffer.
+    std::snprintf(&buf[0], buf.size(), fmt.c_str(), args...);
+
+    return std::string(buf.begin(), buf.end());
 }
 //---------------------------------------------------------------------------------------------
