@@ -3,9 +3,9 @@
     <table>
         <tr><th>Library     <td>SimpleIni
         <tr><th>File        <td>SimpleIni.h
-        <tr><th>Author      <td>Brodie Thiesfield [code at jellycan dot com]
+        <tr><th>Author      <td>Brodie Thiesfield [brofield at gmail dot com]
         <tr><th>Source      <td>https://github.com/brofield/simpleini
-        <tr><th>Version     <td>4.17
+        <tr><th>Version     <td>4.18
     </table>
 
     Jump to the @link CSimpleIniTempl CSimpleIni @endlink interface documentation.
@@ -20,7 +20,7 @@
     @section features FEATURES
 
     - MIT Licence allows free use in all software (including GPL and commercial)
-    - multi-platform (Windows 95/98/ME/NT/2K/XP/2003, Windows CE, Linux, Unix)
+    - multi-platform (Windows CE/9x/NT..10/etc, Linux, MacOSX, Unix)
     - loading and saving of INI-style configuration files
     - configuration files can have any newline format on all platforms
     - liberal acceptance of file format
@@ -328,7 +328,7 @@ public:
 #endif
 
         /** Strict less ordering by name of key only */
-        struct KeyOrder : std::binary_function<Entry, Entry, bool> {
+        struct KeyOrder {
             bool operator()(const Entry & lhs, const Entry & rhs) const {
                 const static SI_STRLESS isLess = SI_STRLESS();
                 return isLess(lhs.pItem, rhs.pItem);
@@ -336,7 +336,7 @@ public:
         };
 
         /** Strict less ordering by order, and then name of key */
-        struct LoadOrder : std::binary_function<Entry, Entry, bool> {
+        struct LoadOrder {
             bool operator()(const Entry & lhs, const Entry & rhs) const {
                 if (lhs.nOrder != rhs.nOrder) {
                     return lhs.nOrder < rhs.nOrder;
@@ -542,6 +542,18 @@ public:
     /** Query the status of spaces output */
     bool UsingSpaces() const { return m_bSpaces; }
     
+
+    /** Should we recognise and parse quotes in single line values?
+
+        \param a_bParseQuotes  Parse quoted data in values?
+     */
+    void SetQuotes(bool a_bParseQuotes = true) {
+        m_bParseQuotes = a_bParseQuotes;
+    }
+
+    /** Are we permitting keys and values to be quoted? */
+    bool UsingQuotes() const { return m_bParseQuotes; }
+
     /*-----------------------------------------------------------------------*/
     /** @}
         @{ @name Loading INI Data */
@@ -1214,6 +1226,7 @@ private:
 
     bool IsMultiLineTag(const SI_CHAR * a_pData) const;
     bool IsMultiLineData(const SI_CHAR * a_pData) const;
+    bool IsSingleLineQuotedValue(const SI_CHAR* a_pData) const;
     bool LoadMultiLineText(
         SI_CHAR *&          a_pData,
         const SI_CHAR *&    a_pVal,
@@ -1266,6 +1279,9 @@ private:
     /** Should spaces be written out surrounding the equals sign? */
     bool m_bSpaces;
     
+    /** Should quoted data in values be recognized and parsed? */
+    bool m_bParseQuotes;
+
     /** Next order value, used to ensure sections and keys are output in the
         same order that they are loaded/added.
      */
@@ -1289,6 +1305,7 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::CSimpleIniTempl(
   , m_bAllowMultiKey(a_bAllowMultiKey)
   , m_bAllowMultiLine(a_bAllowMultiLine)
   , m_bSpaces(true)
+  , m_bParseQuotes(false)
   , m_nOrder(0)
 { }
 
@@ -1414,14 +1431,18 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::LoadData(
     size_t          a_uDataLen
     )
 {
-    SI_CONVERTER converter(m_bStoreIsUtf8);
+    if (!a_pData) {
+        return SI_OK;
+    }
 
-    // consume the UTF-8 BOM if it exists
-    if (m_bStoreIsUtf8 && a_uDataLen >= 3) {
-        if (memcmp(a_pData, SI_UTF8_SIGNATURE, 3) == 0) {
-            a_pData    += 3;
-            a_uDataLen -= 3;
-        }
+    // if the UTF-8 BOM exists, consume it and set mode to unicode, if we have
+    // already loaded data and try to change mode half-way through then this will
+    // be ignored and we will assert in debug versions
+    if (a_uDataLen >= 3 && memcmp(a_pData, SI_UTF8_SIGNATURE, 3) == 0) {
+        a_pData    += 3;
+        a_uDataLen -= 3;
+        SI_ASSERT(m_bStoreIsUtf8 || !m_pData); // we don't expect mixed mode data
+        SetUnicode();
     }
 
     if (a_uDataLen == 0) {
@@ -1429,6 +1450,7 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::LoadData(
     }
 
     // determine the length of the converted data
+    SI_CONVERTER converter(m_bStoreIsUtf8);
     size_t uLen = converter.SizeFromStore(a_pData, a_uDataLen);
     if (uLen == (size_t)(-1)) {
         return SI_FAIL;
@@ -1654,6 +1676,15 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::FindEntry(
             return LoadMultiLineText(a_pData, a_pVal, pTagName);
         }
 
+        // check for quoted values, we are not supporting escapes in quoted values (yet)
+        if (m_bParseQuotes) {
+            --pTrail;
+            if (pTrail > a_pVal && *a_pVal == '"' && *pTrail == '"') {
+                ++a_pVal;
+                *pTrail = 0;
+            }
+        }
+
         // return the standard entry
         return true;
     }
@@ -1713,6 +1744,41 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::IsMultiLineData(
 
 template<class SI_CHAR, class SI_STRLESS, class SI_CONVERTER>
 bool
+CSimpleIniTempl<SI_CHAR, SI_STRLESS, SI_CONVERTER>::IsSingleLineQuotedValue(
+    const SI_CHAR* a_pData
+) const
+{
+    // data needs quoting if it starts or ends with whitespace
+    // and doesn't have embedded newlines
+
+    // empty string
+    if (!*a_pData) {
+        return false;
+    }
+
+    // check for prefix
+    if (IsSpace(*a_pData)) {
+        return true;
+    }
+
+    // embedded newlines
+    while (*a_pData) {
+        if (IsNewLineChar(*a_pData)) {
+            return false;
+        }
+        ++a_pData;
+    }
+
+    // check for suffix
+    if (IsSpace(*--a_pData)) {
+        return true;
+    }
+
+    return false;
+}
+
+template<class SI_CHAR, class SI_STRLESS, class SI_CONVERTER>
+bool
 CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::IsNewLineChar(
     SI_CHAR a_c
     ) const
@@ -1744,8 +1810,8 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::LoadMultiLineText(
     a_pVal = a_pData;
 
     // find the end tag. This tag must start in column 1 and be
-    // followed by a newline. No whitespace removal is done while
-    // searching for this tag.
+    // followed by a newline. We ignore any whitespace after the end
+    // tag but not whitespace before it.
     SI_CHAR cEndOfLineChar = *a_pData;
     for(;;) {
         // if we are loading comments then we need a comment character as
@@ -1801,10 +1867,18 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::LoadMultiLineText(
         // if are looking for a tag then do the check now. This is done before
         // checking for end of the data, so that if we have the tag at the end
         // of the data then the tag is removed correctly.
-        if (a_pTagName &&
-            (!IsLess(pDataLine, a_pTagName) && !IsLess(a_pTagName, pDataLine)))
-        {
-            break;
+        if (a_pTagName) {
+            // strip whitespace from the end of this tag
+            SI_CHAR* pc = a_pData - 1;
+            while (pc > pDataLine && IsSpace(*pc)) --pc;
+            SI_CHAR ch = *++pc;
+            *pc = 0;
+
+            if (!IsLess(pDataLine, a_pTagName) && !IsLess(a_pTagName, pDataLine)) {
+                break;
+            }
+
+            *pc = ch;
         }
 
         // if we are at the end of the data then we just automatically end
@@ -1924,6 +1998,7 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::AddEntry(
     // check for existence of the key
     TKeyVal & keyval = iSection->second;
     typename TKeyVal::iterator iKey = keyval.find(a_pKey);
+    bInserted = iKey == keyval.end();
 
     // remove all existing entries but save the load order and
     // comment of the first entry
@@ -1970,8 +2045,8 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::AddEntry(
         }
         typename TKeyVal::value_type oEntry(oKey, static_cast<const SI_CHAR *>(NULL));
         iKey = keyval.insert(oEntry);
-        bInserted = true;
     }
+
     iKey->second = a_pValue;
     return bInserted ? SI_INSERTED : SI_UPDATED;
 }
@@ -2418,6 +2493,19 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::Save(
     oSections.sort(typename Entry::LoadOrder());
 #endif
 
+    // if there is an empty section name, then it must be written out first
+    // regardless of the load order
+    typename TNamesDepend::iterator is = oSections.begin();
+    for (; is != oSections.end(); ++is) {
+        if (!*is->pItem) {
+            // move the empty section name to the front of the section list
+            if (is != oSections.begin()) {
+                oSections.splice(oSections.begin(), oSections, is, std::next(is));
+            }
+            break;
+        }
+    }
+
     // write the file comment if we have one
     bool bNeedNewLine = false;
     if (m_pFileComment) {
@@ -2498,7 +2586,14 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::Save(
                     return SI_FAIL;
                 }
                 a_oOutput.Write(m_bSpaces ? " = " : "=");
-                if (m_bAllowMultiLine && IsMultiLineData(iValue->pItem)) {
+                if (m_bParseQuotes && IsSingleLineQuotedValue(iValue->pItem)) {
+                    // the only way to preserve external whitespace on a value (i.e. before or after)
+                    // is to quote it. This is simple quoting, we don't escape quotes within the data.
+                    a_oOutput.Write("\"");
+                    a_oOutput.Write(convert.Data());
+                    a_oOutput.Write("\"");
+                }
+                else if (m_bAllowMultiLine && IsMultiLineData(iValue->pItem)) {
                     // multi-line data needs to be processed specially to ensure
                     // that we use the correct newline format for the current system
                     a_oOutput.Write("<<<END_OF_TEXT" SI_NEWLINE_A);
@@ -2662,13 +2757,15 @@ CSimpleIniTempl<SI_CHAR,SI_STRLESS,SI_CONVERTER>::DeleteString(
 // SimpleIni.h, set the converter that you wish you use by defining one of the
 // following symbols.
 //
+//  SI_NO_CONVERSION        Do not make the "W" wide character version of the
+//                          library available. Only CSimpleIniA etc is defined.
 //  SI_CONVERT_GENERIC      Use the Unicode reference conversion library in
 //                          the accompanying files ConvertUTF.h/c
 //  SI_CONVERT_ICU          Use the IBM ICU conversion library. Requires
 //                          ICU headers on include path and icuuc.lib
 //  SI_CONVERT_WIN32        Use the Win32 API functions for conversion.
 
-#if !defined(SI_CONVERT_GENERIC) && !defined(SI_CONVERT_WIN32) && !defined(SI_CONVERT_ICU)
+#if !defined(SI_NO_CONVERSION) && !defined(SI_CONVERT_GENERIC) && !defined(SI_CONVERT_WIN32) && !defined(SI_CONVERT_ICU)
 # ifdef _WIN32
 #  define SI_CONVERT_WIN32
 # else
@@ -3398,6 +3495,19 @@ public:
 #endif // SI_CONVERT_WIN32
 
 
+
+// ---------------------------------------------------------------------------
+//                              SI_NO_CONVERSION
+// ---------------------------------------------------------------------------
+#ifdef SI_NO_CONVERSION
+
+#define SI_Case     SI_GenericCase
+#define SI_NoCase   SI_GenericNoCase
+
+#endif // SI_NO_CONVERSION
+
+
+
 // ---------------------------------------------------------------------------
 //                                  TYPE DEFINITIONS
 // ---------------------------------------------------------------------------
@@ -3407,27 +3517,35 @@ typedef CSimpleIniTempl<char,
 typedef CSimpleIniTempl<char,
     SI_Case<char>,SI_ConvertA<char> >                   CSimpleIniCaseA;
 
-#if defined(SI_CONVERT_ICU)
+#if defined(SI_NO_CONVERSION)
+// if there is no wide char conversion then we don't need to define the
+// widechar "W" versions of CSimpleIni
+# define CSimpleIni      CSimpleIniA
+# define CSimpleIniCase  CSimpleIniCaseA
+# define SI_NEWLINE      SI_NEWLINE_A
+#else
+# if defined(SI_CONVERT_ICU)
 typedef CSimpleIniTempl<UChar,
     SI_NoCase<UChar>,SI_ConvertW<UChar> >               CSimpleIniW;
 typedef CSimpleIniTempl<UChar,
     SI_Case<UChar>,SI_ConvertW<UChar> >                 CSimpleIniCaseW;
-#else
+# else
 typedef CSimpleIniTempl<wchar_t,
     SI_NoCase<wchar_t>,SI_ConvertW<wchar_t> >           CSimpleIniW;
 typedef CSimpleIniTempl<wchar_t,
     SI_Case<wchar_t>,SI_ConvertW<wchar_t> >             CSimpleIniCaseW;
-#endif
+# endif
 
-#ifdef _UNICODE
-# define CSimpleIni      CSimpleIniW
-# define CSimpleIniCase  CSimpleIniCaseW
-# define SI_NEWLINE      SI_NEWLINE_W
-#else // !_UNICODE
-# define CSimpleIni      CSimpleIniA
-# define CSimpleIniCase  CSimpleIniCaseA
-# define SI_NEWLINE      SI_NEWLINE_A
-#endif // _UNICODE
+# ifdef _UNICODE
+#  define CSimpleIni      CSimpleIniW
+#  define CSimpleIniCase  CSimpleIniCaseW
+#  define SI_NEWLINE      SI_NEWLINE_W
+# else // !_UNICODE
+#  define CSimpleIni      CSimpleIniA
+#  define CSimpleIniCase  CSimpleIniCaseA
+#  define SI_NEWLINE      SI_NEWLINE_A
+# endif // _UNICODE
+#endif
 
 #ifdef _MSC_VER
 # pragma warning (pop)

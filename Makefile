@@ -9,7 +9,7 @@ LDLIBS   := -lcurl -lcrypto -lz
 
 JSON_VERSION        ?= v3.11.2
 CXXOPTS_VERSION     ?= v1.0.0
-SIMPLEINI_VERSION   ?= 66a7ead100f7f41c14afc0ab528a46f928a9f3d8 # approx 4.17
+SIMPLEINI_VERSION   ?= 4.19
 EASYLOGGING_VERSION ?= v9.97.0
 
 ifdef DEBUG
